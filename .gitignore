@@ -48,3 +48,4 @@ Temporary Items
 #ignore
 
 **/node_modules/
+.txt
