@@ -8,7 +8,6 @@ var async = require('async');
 var cheerio = require('cheerio');
 var cookieColl = Request.jar();
 var url = require('url');
-var superagent = require('superagent');
 
 var app = express();
 var request = Request.defaults({
@@ -38,72 +37,6 @@ app.get('/', function(req, res, next) {
             if (err) throw err;
             console.log('saver'); //文件被保存
         });
-    }
-
-
-
-
-    function getFansRecur(userId) {
-
-        //新浪限制只能取每人前十页的fans
-        for (var i = 1; i < 10; i++) {
-            var fansUrl = "http://weibo.com/" + userId + "/follow?page=" + i;
-
-            request({
-                "uri": fansUrl,
-                "encoding": "utf-8"
-            }, function(err, response, body) {
-                if (err) {
-                    console.log(err);
-                } else {
-                    var userLst = getUserLst(body, userId);
-                    console.log(userLst)
-                        // if (userLst) {
-                        //     userLst.map(function(item) {
-                        //         getFansRecur(item.uId);
-                        //     });
-                        // }
-                }
-            });
-
-        }
-    }
-
-    function getUserLst(htmlContent, userId) {
-        var matched = htmlContent.match(/\"follow_list\s*\\\".*\/ul>/gm);
-
-        if (matched) {
-            var str = matched[0].replace(/(\\n|\\t|\\r)/g, " ").replace(/\\/g, "");
-            var ulStr = "<ul class=" + str;
-
-            var $ = cheerio.load(ulStr);
-
-            var myFans = [];
-            $("li[action-data]").map(function(index, item) {
-                var userInfo = getUserInfo($, this);
-
-                if (userInfo) {
-                    if (!cachedUsers[userInfo.uId]) {
-                        userInfo.from = userId; //设置来源用户
-                        cachedUsers[userInfo.uId] = true;
-
-                        // if(userInfo.fansCnt > 100){
-
-                        userCnt++;
-                        console.log(userCnt);
-                        saveUser(userInfo);
-                        myFans.push(userInfo);
-
-                    } else {
-                        console.log("duplicate users");
-                    }
-                }
-            });
-
-            return myFans;
-        }
-
-        return null;
     }
 
 
@@ -213,58 +146,40 @@ app.get('/', function(req, res, next) {
             function(responseCode, body, callback) {
                 console.log("开始分析... ");
 
-
-                // var userColl = db.get("users");
-                // var lastUid = "";
-                // console.log("查询已经记录的用户");
-                // var nIndex = 0;
-
-                // userColl.find({}, {
-                //     stream: true
-                // }).each(function(doc) {
-                //     cachedUsers[doc.uId] = true;
-                //     lastUid = doc.uId;
-                // }).success(function() {
-                //     console.log("已有用户已经缓存完成, 开始进行递归查询");
-                //     console.log(lastUid);
-                //     getFansRecur("3423485724"); //周鸿祎
-                // }).error(function(err) {
-                //     console.log(err);
-                // });
-
-
-                var myFans = getFriendUrl(body);
+                var myFans = getFriends(body);
                 callback(null, myFans);
                 // console.log("Myfans:" + myFans.length);
                 // myFans.map(function(item) {
                 //     getFansRecur(item.uId);
                 // });
             },
-            function(fansUrl, callbackb) {
+            function(fansList, callback) {
+                var profile = async.mapLimit(fansList, 5, function(item, callback) {
+                    request({
+                        "uri": item['href'],
+                        "encoding": "utf-8"
+                    }, function(err, response, body) {
+                        if (err) {
+                            console.log(err);
+                        } else {
+                            var userInfo=getUserInfo(body,item['username']);
 
-                fs.writeFile('tarTxt', strHtml, function(err) {
-                    if (err) throw err;
-                    console.log('saved')
+                            callback(null, userInfo);
+                        }
+                    });
+
+                }, function(err, results) {
+                    res.send(results)
+                    fs.writeFile("results2.txt",results, function(err) {
+                        if (err) throw err;
+                        console.log('saver'); //文件被保存
+                    });
                 });
-                res.send(fansUrl)
-                    // var profile = async.mapLimit(fansUrl, 5, function(itemUrl, callback) {
-                    //     superagent.get(itemUrl)
-                    //         .end(function(err, sres) {
-                    //             var $ = cheerio.load(sres.text);
-                    //             var username = $('.username').text();
-                    //             var title = $('.pf_intro').text();
-                    //             var sProfile = {
-                    //                 usrname: usrname,
-                    //                 title: title
-                    //             };
-                    //             callback(null, sProfile);
-                    //         });
-                    // }, function(err, results) {
-                    //     res.send(results);
-                    //     // console.log(results)
-                    // });
+
+                // callback(null, results);
 
             }
+
         ], function(err) {
             console.log(err)
         });
@@ -274,7 +189,7 @@ app.get('/', function(req, res, next) {
 
 
     //功能函数
-    function getFriendUrl(reshtml) {
+    function getFriends(reshtml) {
 
         var matched = reshtml.match(/\"follow_list\s*\\\".*\/ul>/gm);
 
@@ -288,8 +203,11 @@ app.get('/', function(req, res, next) {
                 var $profile = $element.find('.info_name>a');
                 var username = $profile.attr('alt');
                 var href = url.resolve(baseUrl, $profile.attr('href'));
-
-                fansUrl.push(href);
+                var friends={
+                    username:username,
+                    href:href
+                }
+                fansUrl.push(friends);
             });
 
             return fansUrl;
@@ -298,20 +216,41 @@ app.get('/', function(req, res, next) {
 
     }
 
-    function getUserInfo($, liSelector) {
-        res.send($)
+    function getUserInfo(body,username) {
+        var matched = body.match(/\"PCD_person_info\s*\\\".*\/div>/gm);
 
+        if (matched) {
+            var inf=[];
+            inf.push(username)
+            var html = matched[0].replace(/(\\n|\\t|\\r)/g, " ").replace(/\\/g, "");
+            var strHtml = "<div class=" + html;
+            // var strHtml = iconv.decode(strHtml, 'gb2312')
+            var $ = cheerio.load(strHtml, {decodeEntities: false})
+            var details = $('.ul_detail .item_text');
+            // details=iconv.decode(details, "GBK")
+            
+            details.map(function(index, elem) {
+                inf.push($(details[index]).text());
+            })
 
-        return {
-            name: alnk.text(),
-            uId: alnk.attr("usercard").split('=')[1],
-            followCnt: tryParseInt($(cntSel[0]).text()),
-            fansCnt: tryParseInt($(cntSel[1]).text()),
-            weiboCnt: tryParseInt($(cntSel[2]).text()),
-            addr: addr,
-            sex: sex,
-            info: personInfo
-        };
+        
+            return inf;
+            // var location = details[0].find('.item_text').text();
+            // var school = details[1].find('.item_text').text();
+            // var love = details[2].find('.item_text').text();
+            // var birthday = details[3].find('.item_text').text();
+            // var introduction = details[4].find('.item_text').text();
+
+            // return {
+            //     // name: name,
+            //     // sex: sex,
+            //     location: location
+            //     // school: school,
+            //     // love: love,
+            //     // birthday: birthday,
+            //     // introduction: introduction
+            // };
+        }
     }
 
 
