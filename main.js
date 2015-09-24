@@ -33,10 +33,10 @@ app.get('/', function(req, res, next) {
     function saveUser(user) {
         // var userColl = db.get("users");
         //  userColl.insert(user);
-        fs.writeFile("results", user, function(err) {
-            if (err) throw err;
-            console.log('saver'); //文件被保存
-        });
+        // fs.writeFile("results", user, function(err) {
+        //     if (err) throw err;
+        //     console.log('saver'); //文件被保存
+        // });
     }
 
 
@@ -162,7 +162,7 @@ app.get('/', function(req, res, next) {
                         if (err) {
                             console.log(err);
                         } else {
-                            var userInfo=getUserInfo(body,item['username']);
+                            var userInfo = getUserInfo(body, item);
 
                             callback(null, userInfo);
                         }
@@ -170,7 +170,7 @@ app.get('/', function(req, res, next) {
 
                 }, function(err, results) {
                     res.send(results)
-                    fs.writeFile("results2.txt",results, function(err) {
+                    fs.writeFile("results2.txt", results, function(err) {
                         if (err) throw err;
                         console.log('saver'); //文件被保存
                     });
@@ -203,9 +203,17 @@ app.get('/', function(req, res, next) {
                 var $profile = $element.find('.info_name>a');
                 var username = $profile.attr('alt');
                 var href = url.resolve(baseUrl, $profile.attr('href'));
-                var friends={
-                    username:username,
-                    href:href
+                var sex='unknown';
+                if($profile.find('.icon_female').length>0){
+                    sex='female'
+                }else{
+                    sex='male'
+                }
+
+                var friends = {
+                    username: username,
+                    href: href,
+                    sex:sex
                 }
                 fansUrl.push(friends);
             });
@@ -216,40 +224,41 @@ app.get('/', function(req, res, next) {
 
     }
 
-    function getUserInfo(body,username) {
+    function getUserInfo(body, users) {
         var matched = body.match(/\"PCD_person_info\s*\\\".*\/div>/gm);
 
         if (matched) {
-            var inf=[];
-            inf.push(username)
+
             var html = matched[0].replace(/(\\n|\\t|\\r)/g, " ").replace(/\\/g, "");
             var strHtml = "<div class=" + html;
             // var strHtml = iconv.decode(strHtml, 'gb2312')
-            var $ = cheerio.load(strHtml, {decodeEntities: false})
-            var details = $('.ul_detail .item_text');
-            // details=iconv.decode(details, "GBK")
-            
-            details.map(function(index, elem) {
-                inf.push($(details[index]).text());
+            var $ = cheerio.load(strHtml, {
+                decodeEntities: false
             })
+            var $details = $('.ul_detail');
+            // details=iconv.decode(details, "GBK")
 
-        
-            return inf;
-            // var location = details[0].find('.item_text').text();
-            // var school = details[1].find('.item_text').text();
-            // var love = details[2].find('.item_text').text();
-            // var birthday = details[3].find('.item_text').text();
-            // var introduction = details[4].find('.item_text').text();
+            // details.map(function(index, elem) {
+            //     inf.push($(details[index]).text());
+            // })
+            var location = getElmDetail($details, '.ficon_cd_place');
+            var school = getElmDetail($details, '.ficon_edu');
+            var love = getElmDetail($details, '.ficon_relationship');
+            var birthday = getElmDetail($details, '.ficon_constellation');
+            var introduction = getElmDetail($details, '.ficon_pinfo');
+            var email = getElmDetail($details, '.ficon_email');
 
-            // return {
-            //     // name: name,
-            //     // sex: sex,
-            //     location: location
-            //     // school: school,
-            //     // love: love,
-            //     // birthday: birthday,
-            //     // introduction: introduction
-            // };
+            return {
+                username: users['username'],
+                url:users['href'],
+                sex: users['sex'],
+                location: location,
+                school: school,
+                email:email,
+                love: love,
+                birthday: birthday,
+                introduction: introduction
+            };
         }
     }
 
@@ -261,6 +270,12 @@ app.get('/', function(req, res, next) {
         var jsonStr = body.substr(start, end - start + 1);
         var responseJson = JSON.parse(jsonStr);
         return responseJson;
+    }
+
+    //获取detail信息
+    function getElmDetail(root, target) {
+        var val = root.find(target).closest('span').next().text();
+        return val;
     }
 
 })
