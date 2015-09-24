@@ -30,6 +30,9 @@ var password = "";
 
 
 app.get('/', function(req, res, next) {
+
+    var finalResults = [];
+
     function saveUser(user) {
         // var userColl = db.get("users");
         //  userColl.insert(user);
@@ -133,50 +136,23 @@ app.get('/', function(req, res, next) {
                 console.log("登录完成");
                 var responseJson = getJsonObj(body);
 
+                // 自己的粉丝
+                var targetUrl = "http://weibo.com/" + responseJson.userinfo.uniqueid + "/myfans";
+                getFansRecur(responseJson.userinfo.uniqueid);
+                callback(null, finalResults);
+                // 指定的关注列表
+                // var targetId=2190251262;
+                // var targetUrl = "http://weibo.com/p/100505" + targetId+ "/follow?page="
 
-                var myfansUrl = "http://weibo.com/" + responseJson.userinfo.uniqueid + "/myfans"
+                // request({
+                //     "uri": targetUrl,
+                //     "encoding": "utf-8"
+                // }, callback);
 
-                request({
-                    "uri": myfansUrl,
-                    "encoding": "utf-8"
-                }, callback);
-
-                var fansUrl = "http://weibo.com/{userId}/fans";
             },
-            function(responseCode, body, callback) {
-                console.log("开始分析... ");
+            function(fans, callback) {
 
-                var myFans = getFriends(body);
-                callback(null, myFans);
-                // console.log("Myfans:" + myFans.length);
-                // myFans.map(function(item) {
-                //     getFansRecur(item.uId);
-                // });
-            },
-            function(fansList, callback) {
-                var profile = async.mapLimit(fansList, 5, function(item, callback) {
-                    request({
-                        "uri": item['href'],
-                        "encoding": "utf-8"
-                    }, function(err, response, body) {
-                        if (err) {
-                            console.log(err);
-                        } else {
-                            var userInfo = getUserInfo(body, item);
-
-                            callback(null, userInfo);
-                        }
-                    });
-
-                }, function(err, results) {
-                    res.send(results)
-                    fs.writeFile("results2.txt", results, function(err) {
-                        if (err) throw err;
-                        console.log('saver'); //文件被保存
-                    });
-                });
-
-                // callback(null, results);
+                // res.send(fans)
 
             }
 
@@ -189,6 +165,40 @@ app.get('/', function(req, res, next) {
 
 
     //功能函数
+
+    //获取我的所有粉丝页面 html
+    function getFansRecur(userId) {
+        var fansUrlList=[];
+        for (var i = 1; i < 30; i++) {
+            var fansUrl = "http://weibo.com/" + userId + "/fans?Pl_Official_RelationFans__103_page=" + i;
+            fansUrlList.push(fansUrl)
+        }
+       
+        async.eachLimit(fansUrlList, 10, function(item, callback) {
+            request({
+                "uri": item,
+                "encoding": "utf-8"
+            }, function(err, response, body) {
+                if (err) {
+                    console.log(err);
+                } else {
+                    var userLst = getFriends(body);
+                    console.log(userLst,item.split('=')[1])
+                    // fs.writeFile("./file/" + item.split('=')[1] + '.txt', body, function(err) {
+                    //     if (err) throw err;
+                    //     console.log(item.split('=')[1]); //文件被保存
+                    // });
+                    getUserLoop(userLst);
+                }
+            });
+
+        }, function(err, results) {
+            finalResults.push(results)
+
+        });
+    }
+
+    //解析每个页面的friends
     function getFriends(reshtml) {
 
         var matched = reshtml.match(/\"follow_list\s*\\\".*\/ul>/gm);
@@ -203,25 +213,43 @@ app.get('/', function(req, res, next) {
                 var $profile = $element.find('.info_name>a');
                 var username = $profile.attr('alt');
                 var href = url.resolve(baseUrl, $profile.attr('href'));
-                var sex='unknown';
-                if($profile.find('.icon_female').length>0){
-                    sex='female'
-                }else{
-                    sex='male'
+                var sex = 'unknown';
+                if ($profile.find('.icon_female').length > 0) {
+                    sex = 'female'
+                } else {
+                    sex = 'male'
                 }
-
                 var friends = {
                     username: username,
                     href: href,
-                    sex:sex
+                    sex: sex
                 }
                 fansUrl.push(friends);
             });
-
             return fansUrl;
         }
 
+    }
 
+    function getUserLoop(fansList) {
+        var profile = async.mapLimit(fansList, 5, function(item, callback) {
+            request({
+                "uri": item['href'],
+                "encoding": "utf-8"
+            }, function(err, response, body) {
+                if (err) {
+                    console.log(err);
+                } else {
+                    var userInfo = getUserInfo(body, item);
+
+                    callback(null, userInfo);
+                }
+            });
+
+        }, function(err, results) {
+            finalResults.push(results)
+
+        });
     }
 
     function getUserInfo(body, users) {
@@ -250,11 +278,11 @@ app.get('/', function(req, res, next) {
 
             return {
                 username: users['username'],
-                url:users['href'],
+                url: users['href'],
                 sex: users['sex'],
                 location: location,
                 school: school,
-                email:email,
+                email: email,
                 love: love,
                 birthday: birthday,
                 introduction: introduction
