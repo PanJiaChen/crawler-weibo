@@ -57,16 +57,11 @@ app.get('/', function(req, res, next) {
         var preLoginUrl = "http://login.sina.com.cn/sso/prelogin.php?entry=weibo&callback=sinaSSOController.preloginCallBack&su=&rsakt=mod&checkpin=1&client=ssologin.js(v1.4.11)&_=" + (new Date()).getTime();
         async.waterfall([
             function(callback) {
-                // fs.writeFile("result.txt", preLoginUrl, function(err) {
-                //     if (err) throw err;
-                //     console.log("File Saved !"); //文件被保存
-                // });
                 request({
                     "uri": preLoginUrl,
                     "encoding": "utf-8"
                 }, callback);
             },
-
             function(responseCode, body, callback) {
                 var responseJson = getJsonObj(body);
                 var loginUrl = 'http://login.sina.com.cn/sso/login.php?client=ssologin.js(v1.4.18)';
@@ -138,8 +133,21 @@ app.get('/', function(req, res, next) {
 
                 // 自己的粉丝
                 var targetUrl = "http://weibo.com/" + responseJson.userinfo.uniqueid + "/myfans";
-                getFansRecur(responseJson.userinfo.uniqueid);
-                callback(null, finalResults);
+                async.waterfall([
+                    function(cb) {
+                       var pages = getFansPageNum(targetUrl);
+                        cb(null, pages);
+                    },
+                    function(pages, cb) {
+                        console.log(pages)
+                       getFansRecur(responseJson.userinfo.uniqueid, pages);
+                       
+                    }
+                ], function(err, result) {
+                     // callback(null, finalResults);
+                });
+                
+
                 // 指定的关注列表
                 // var targetId=2190251262;
                 // var targetUrl = "http://weibo.com/p/100505" + targetId+ "/follow?page="
@@ -148,12 +156,9 @@ app.get('/', function(req, res, next) {
                 //     "uri": targetUrl,
                 //     "encoding": "utf-8"
                 // }, callback);
-
             },
-            function(fans, callback) {
-
+            function(pages, callback) {
                 // res.send(fans)
-
             }
 
         ], function(err) {
@@ -166,15 +171,44 @@ app.get('/', function(req, res, next) {
 
     //功能函数
 
+    //获取fans page的页数
+    function getFansPageNum(targetUrl) {
+        request({
+            "uri": targetUrl,
+            "encoding": "utf-8"
+        }, function(err, response, body) {
+            if (err) {
+                console.log(err);
+            } else {
+                var matched = body.match(/\"W_pages\s*\\\".*\/div>/gm);
+
+                if (matched) {
+
+                    var html = matched[0].replace(/(\\n|\\t|\\r)/g, " ").replace(/\\/g, "");
+                    var strHtml = "<div class=" + html;
+                    // var strHtml = iconv.decode(strHtml, 'gb2312')
+                    var $ = cheerio.load(strHtml, {
+                        decodeEntities: false
+                    })
+
+                    var page = $('.page').eq($('.page').length - 2).text();
+                    console.log(page)
+                    return page
+                }
+            }
+        });
+    }
+
     //获取我的所有粉丝页面 html
-    function getFansRecur(userId) {
-        var fansUrlList=[];
-        for (var i = 1; i < 30; i++) {
+    function getFansRecur(userId, page) {
+        var fansUrlList = [];
+        for (var i = 1; i <= page; i++) {
             var fansUrl = "http://weibo.com/" + userId + "/fans?Pl_Official_RelationFans__103_page=" + i;
             fansUrlList.push(fansUrl)
         }
-       
-        async.eachLimit(fansUrlList, 10, function(item, callback) {
+
+        async.concatSeries(fansUrlList, function(item, callback) {
+
             request({
                 "uri": item,
                 "encoding": "utf-8"
@@ -182,24 +216,34 @@ app.get('/', function(req, res, next) {
                 if (err) {
                     console.log(err);
                 } else {
-                    var userLst = getFriends(body);
-                    console.log(userLst,item.split('=')[1])
-                    // fs.writeFile("./file/" + item.split('=')[1] + '.txt', body, function(err) {
+
+                    var userList = getFriends(body);
+
+                    console.log('start:' + item.split('=')[1]); //文件被保存
+                    //  fs.writeFile("./file/" + item.split('=')[1] + '.txt', userList, function(err) {
                     //     if (err) throw err;
                     //     console.log(item.split('=')[1]); //文件被保存
                     // });
-                    getUserLoop(userLst);
+
+
+                    callback(null, userList)
                 }
             });
 
         }, function(err, results) {
-            finalResults.push(results)
-
+            var result = getUserLoop(results);
+            // fs.writeFile("./file/results.txt", results, function(err) {
+            //     if (err) throw err;
+            //     console.log("save"); //文件被保存
+            // });
+            // res.send(result)
+            // finalResults.push(results)
+            // console.log(results)
         });
     }
 
     //解析每个页面的friends
-    function getFriends(reshtml) {
+    function getFriends(reshtml, id) {
 
         var matched = reshtml.match(/\"follow_list\s*\\\".*\/ul>/gm);
 
@@ -226,13 +270,17 @@ app.get('/', function(req, res, next) {
                 }
                 fansUrl.push(friends);
             });
+
+            // fs.writeFile("./file/" + id + '.txt', id, function(err) {
+            //             if (err) throw err;
+            //             console.log(id); //文件被保存
+            //         });
             return fansUrl;
         }
-
     }
 
     function getUserLoop(fansList) {
-        var profile = async.mapLimit(fansList, 5, function(item, callback) {
+        async.concatSeries(fansList, function(item, callback) {
             request({
                 "uri": item['href'],
                 "encoding": "utf-8"
@@ -241,13 +289,14 @@ app.get('/', function(req, res, next) {
                     console.log(err);
                 } else {
                     var userInfo = getUserInfo(body, item);
-
+                    console.log(userInfo)
                     callback(null, userInfo);
                 }
             });
 
         }, function(err, results) {
-            finalResults.push(results)
+            res.send(results)
+            return results;
 
         });
     }
